@@ -47,50 +47,317 @@ torch.set_num_threads(1)
 
 st.markdown("""
 <style>
-:root {--ink:#172d3b;--deep:#0e3445;--teal:#087f76;--muted:#617582;--rule:#dfe9e9;--soft:#f2f7f7;}
-[data-testid="stAppViewContainer"] {background: #f7faf9;}
-[data-testid="stHeader"] {background: rgba(247,250,249,.92);}
-.block-container {max-width:1160px; padding-top:1.6rem; padding-bottom:3rem;}
-h1,h2,h3 {color:#172d3b;letter-spacing:-.035em;}
-h2 {font-weight:750;}
-p,li {line-height:1.6;}
-.hero {padding:2.1rem 2.35rem;border:1px solid #dbe6e7;border-radius:22px;
-       background:linear-gradient(115deg,#ffffff 0%,#f3f9f8 66%,#e4f2ef 100%);
-       box-shadow:0 10px 30px rgba(23,45,59,.045); margin-bottom:1.25rem;}
-.eyebrow {font-weight:800;letter-spacing:.15em;text-transform:uppercase;font-size:.70rem;color:#087f76;}
-.hero h1 {font-size:clamp(2rem,3.7vw,3rem);line-height:1.08; margin:.6rem 0 .65rem;font-weight:800;}
-.hero p {color:#4f6773;margin:0;max-width:770px;font-size:1.04rem;line-height:1.55;}
-.hero-meta {margin-top:1.2rem;display:flex;gap:.6rem;flex-wrap:wrap;}
-.meta-chip {border:1px solid #cfe3df;border-radius:99px;padding:.35rem .74rem;
-            color:#215a56;font-size:.78rem;font-weight:650;background:#ffffffbb;}
-.steps {display:flex; gap:0.7rem; margin:0 0 1.15rem;flex-wrap:wrap;}
-.step {display:flex;align-items:center;gap:.5rem;background:#fff;border:1px solid #e2ecec;
-       border-radius:12px;padding:.65rem .9rem;color:#526d76;font-weight:650;font-size:.86rem;}
-.step b {color:#087f76;font-size:.78rem;font-weight:850;}
-.section-label {font-size:1.18rem;color:#173746;font-weight:800;margin:0 0 .2rem;}
-.section-sub {color:#6a7f85;font-size:.91rem;margin:0 0 .8rem;}
-[data-testid="stVerticalBlockBorderWrapper"] {border-color:#dee9e8;}
-[data-testid="stMetric"] {border:1px solid #e2ebea;background:#fff;border-radius:14px;
-                            padding:15px 17px;min-height:112px;}
-[data-testid="stMetricLabel"] {color:#617581;}
-[data-testid="stMetricValue"] {font-size:1.5rem;}
-.stButton button[kind="primary"],.stDownloadButton button[kind="primary"] {
-    border-radius:10px;background:#087f76!important;border-color:#087f76!important;
-    color:#fff!important;font-weight:700;min-height:47px;}
-.stButton button[kind="primary"]:hover {background:#09675f!important;border-color:#09675f!important;}
-.stButton button, .stDownloadButton button {border-radius:10px;min-height:41px;}
-.result-banner {padding:1.15rem 1.45rem;border-radius:15px;margin:0 0 1rem;
-                border:1px solid #b5ddd3;background:#eaf8f4;color:#18544d;}
-.result-banner.no-crack {border-color:#cbd9e6;background:#f0f5fa;color:#254763;}
+/* CrackSAFE-MRC · FOREST ATELIER
+   Editorial research interface: muted forest, warm ivory, sage, clay, brass.
+   These rules change presentation only. Inference, CAM and session logic remain intact. */
+:root {
+  --forest: #2d4b38;
+  --forest-deep: #203629;
+  --forest-soft: #4f6c50;
+  --sage: #aebda4;
+  --sage-light: #e8eee4;
+  --brass: #c5a46d;
+  --clay: #ad795e;
+  --cream: #f8f6ef;
+  --paper: #fffcf6;
+  --ink: #28342b;
+  --muted: #626e61;
+  --line: #dedfd3;
+}
+html, body, [data-testid="stAppViewContainer"] {
+  color: var(--ink);
+  font-family: "Aptos", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+[data-testid="stAppViewContainer"] {
+  background:
+    radial-gradient(ellipse 38rem 23rem at 95% 7%, rgba(191,159,108,.16) 0%, transparent 78%),
+    radial-gradient(ellipse 32rem 23rem at 2% 37%, rgba(156,179,145,.15) 0%, transparent 78%),
+    linear-gradient(180deg,#f8f6ef 0%,#fbfaf6 46%,#f6f5ee 100%);
+}
+[data-testid="stHeader"] {background: rgba(248,246,239,.88);}
+[data-testid="stToolbar"] {color:var(--forest-deep);}
+.block-container {max-width:1190px; padding-top:1.75rem; padding-bottom:3.4rem;}
+h1,h2,h3 {color:var(--ink);letter-spacing:-.035em;}
+h2 {font-weight:730;}
+p,li {line-height:1.66;}
+a {color:#355c3e;}
+a:hover {color:#7c573f;}
+
+/* Hero: warm, editorial and visibly different from generic Streamlit dashboards. */
+.hero {
+  position:relative;
+  isolation:isolate;
+  overflow:hidden;
+  padding:3.05rem 3.25rem 3.1rem;
+  border:1px solid #526b50;
+  border-radius:24px;
+  background:
+    radial-gradient(ellipse 26rem 23rem at 99% -18%,rgba(213,181,121,.29),transparent 74%),
+    radial-gradient(ellipse 33rem 23rem at 94% 112%,rgba(162,182,141,.24),transparent 75%),
+    linear-gradient(115deg,#20372b 0%,#30523b 56%,#647457 100%);
+  box-shadow:0 18px 45px rgba(39,59,42,.14),0 2px 10px rgba(39,59,42,.06);
+  margin-bottom:1.5rem;
+}
+.hero::before {
+  content:"";
+  position:absolute;
+  top:0;left:0;right:0;height:4px;
+  background:linear-gradient(90deg,#b78d5e,#e4c997 39%,#a3b498 77%,transparent);
+  z-index:1;
+}
+.hero::after {
+  content:"";
+  position:absolute;
+  width:335px;height:335px;
+  right:-81px;top:-132px;
+  border-radius:50%;
+  border:1px solid rgba(246,228,194,.18);
+  box-shadow:0 0 0 50px rgba(241,221,183,.037),0 0 0 114px rgba(241,221,183,.025);
+  z-index:-1;
+  pointer-events:none;
+}
+.eyebrow {
+  display:inline-block;
+  border-left:3px solid #d6b476;
+  padding:.18rem 0 .18rem .85rem;
+  font-weight:780;
+  letter-spacing:.165em;
+  text-transform:uppercase;
+  font-size:.72rem;
+  color:#ecd3a5;
+}
+.hero h1 {
+  position:relative;
+  max-width:900px;
+  font-family:"Iowan Old Style","Palatino Linotype",Georgia,serif;
+  font-size:clamp(2.3rem,4.05vw,3.55rem);
+  font-weight:700;
+  line-height:1.13;
+  letter-spacing:-.042em;
+  color:#fff9eb!important;
+  margin:.9rem 0 1rem;
+}
+.hero p {
+  max-width:730px;
+  font-size:1.055rem;
+  line-height:1.75;
+  color:#e6ecdf;
+  margin:0;
+}
+.hero-meta {margin-top:1.55rem;display:flex;gap:.65rem;flex-wrap:wrap;}
+.meta-chip {
+  display:inline-flex;align-items:center;
+  border:1px solid rgba(229,215,179,.36);
+  border-radius:99px;
+  padding:.39rem .83rem;
+  color:#f7ecd7;
+  font-size:.76rem;
+  letter-spacing:.015em;
+  font-weight:650;
+  background:rgba(255,255,246,.09);
+  backdrop-filter:blur(4px);
+}
+.meta-chip:first-child {border-color:rgba(232,197,140,.56);background:rgba(198,156,93,.16);}
+
+/* Friendly, deliberate workflow cards. */
+.steps {display:flex;gap:.9rem;margin:0 0 1.6rem;flex-wrap:wrap;}
+.step {
+  display:flex;align-items:center;gap:.68rem;
+  background:linear-gradient(125deg,#fffcf6,#f4f1e8);
+  border:1px solid #e4decf;
+  border-top:3px solid #bfa06e;
+  border-radius:13px;
+  padding:.73rem 1rem;
+  color:#485449;
+  box-shadow:0 5px 16px rgba(61,64,46,.045);
+  font-size:.86rem;
+  font-weight:675;
+}
+.step:nth-child(2){border-top-color:#8c9e82;}
+.step:nth-child(3){border-top-color:#bc866c;}
+.step b {
+  display:inline-grid;place-items:center;
+  width:27px;height:27px;
+  border-radius:9px;
+  background:#e9e7dc;
+  color:#2b4c36;
+  font-size:.72rem;font-weight:800;
+}
+.step:nth-child(3) b{background:#f1e5dc;color:#865842;}
+.section-label {
+  position:relative;
+  font-size:1.24rem;
+  color:#263c2e;
+  font-weight:800;
+  letter-spacing:-.02em;
+  margin:0 0 .25rem;
+  padding-left:1.05rem;
+}
+.section-label::before {
+  content:"";position:absolute;left:0;top:.2rem;
+  width:4px;height:1.13rem;border-radius:4px;
+  background:linear-gradient(#bb8c65,#d3b584);
+}
+.section-sub {color:#687265;font-size:.94rem;margin:0 0 1rem;}
+
+/* The upload workspace should feel like a premium research instrument. */
+[data-testid="stVerticalBlockBorderWrapper"] {
+  border-color:#dddccf!important;
+  border-radius:20px!important;
+  background:linear-gradient(130deg,#fffefa,#fdfbf5 66%,#f5f3e9)!important;
+  box-shadow:0 11px 32px rgba(55,58,37,.065);
+}
+[data-testid="stFileUploaderDropzone"] {
+  border:1px dashed #baa47e!important;
+  border-radius:15px!important;
+  background:linear-gradient(125deg,#fcfaf4,#f3f1e7)!important;
+}
+[data-testid="stFileUploaderDropzone"]:hover {
+  border-color:#8b9b78!important;
+  background:#f3f5eb!important;
+}
+[data-testid="stFileUploaderDropzone"] button {
+  color:#2d4a35!important;
+  background:#fffdf8!important;
+  border:1px solid #d8d5c8!important;
+  border-radius:10px!important;
+  font-weight:670!important;
+}
+[data-testid="stRadio"] [role="radiogroup"] {gap:.75rem;}
+[data-testid="stRadio"] label p {color:#374a37;}
+[data-testid="stImage"] img {border-radius:13px;box-shadow:0 5px 20px rgba(47,53,36,.09);}
+[data-testid="stExpander"] {
+  border:1px solid #dfded1!important;
+  border-radius:12px!important;
+  background:rgba(255,255,251,.83)!important;
+}
+[data-testid="stExpander"] summary {color:#344a36;font-weight:660;}
+
+/* Strong but understated olive-green action; secondary actions stay warm-white. */
+.stButton button[kind="primary"], .stDownloadButton button[kind="primary"] {
+  min-height:49px;
+  border:1px solid #355540!important;
+  border-radius:12px!important;
+  background:linear-gradient(112deg,#284832 0%,#42664a 60%,#657b58 100%)!important;
+  box-shadow:0 6px 16px rgba(37,67,45,.16);
+  color:#fffdf5!important;
+  font-weight:730!important;
+  letter-spacing:.012em;
+  transition:filter .2s ease,transform .2s ease,box-shadow .2s ease;
+}
+.stButton button[kind="primary"]:hover, .stDownloadButton button[kind="primary"]:hover {
+  filter:brightness(1.07);
+  box-shadow:0 8px 19px rgba(37,67,45,.20);
+}
+.stButton button:focus-visible,.stDownloadButton button:focus-visible {
+  outline:3px solid #b59464!important;outline-offset:3px!important;
+}
+.stButton button:not([kind="primary"]), .stDownloadButton button:not([kind="primary"]) {
+  border-radius:10px;
+  border-color:#d9d8cb;
+  min-height:43px;
+  color:#36533b;
+  background:#fffdf8;
+}
+.stButton button:not([kind="primary"]):hover,.stDownloadButton button:not([kind="primary"]):hover {
+  border-color:#8d9d83;
+  background:#f2f4e9;
+  color:#274331;
+}
+button:disabled {box-shadow:none!important;opacity:.72;}
+
+/* Results: slight earthy variation brings hierarchy without looking loud. */
+[data-testid="stMetric"] {
+  position:relative;
+  overflow:hidden;
+  border:1px solid #e1dfd3!important;
+  background:linear-gradient(140deg,#fffef9 30%,#f3f4ea 100%);
+  border-radius:15px!important;
+  padding:17px 18px!important;
+  min-height:116px;
+  box-shadow:0 7px 18px rgba(52,65,41,.052);
+}
+[data-testid="stMetric"]:before {
+  content:"";position:absolute;top:0;left:0;right:0;height:3px;
+  background:linear-gradient(90deg,#bca06d,#8b9f7d 65%,#be8f71);
+}
+[data-testid="stMetricLabel"] {color:#667466;font-size:.81rem;}
+[data-testid="stMetricValue"] {color:#273d2d;font-weight:760;font-size:1.58rem;}
+.result-banner {
+  border:1px solid #cbd9c4;
+  border-left:5px solid #688363;
+  background:linear-gradient(105deg,#e9f0e4 0%,#f8f8ef 72%,#fffaf0 100%);
+  color:#284632;
+  padding:1.25rem 1.55rem;
+  border-radius:15px;
+  margin:0 0 1.25rem;
+  box-shadow:0 6px 20px rgba(57,80,45,.04);
+}
+.result-banner.no-crack {
+  border-color:#e3d8c8;
+  border-left-color:#b78c69;
+  background:linear-gradient(115deg,#f5eadf,#fdf8ed 80%);
+  color:#674b39;
+}
 .result-banner strong {font-size:1.12rem;}
-.result-banner p {margin:.32rem 0 0;font-size:.89rem;color:inherit;}
-.help-strip {padding:.95rem 1.15rem;background:#edf5f5;border:1px solid #d9e9e7;
-             color:#34535a;border-radius:13px;font-size:.87rem;line-height:1.65;}
-.footer-line {padding-top:1.6rem;color:#75848a;font-size:.79rem;border-top:1px solid #dce7e7;margin-top:2.2rem;}
-.small-overline {color:#0c776f;font-size:.77rem;font-weight:800;text-transform:uppercase;letter-spacing:.12em;}
-@media(max-width:720px){.hero{padding:1.45rem 1.25rem;border-radius:16px;}
- .hero h1{font-size:2rem;}.block-container{padding-left:1rem;padding-right:1rem;}
- .step{font-size:.78rem;padding:.52rem .6rem;}}
+.result-banner p {margin:.35rem 0 0;font-size:.9rem;color:inherit;}
+[data-testid="stTabs"] [data-baseweb="tab-list"] {
+  border-bottom-color:#deded1;
+  gap:.4rem;
+}
+[data-testid="stTabs"] [data-baseweb="tab"] {
+  color:#5b6758;
+  border-radius:10px 10px 0 0;
+  padding-left:.75rem;padding-right:.75rem;
+  font-weight:650;
+}
+[data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] {
+  color:#2f5a3d!important;
+  background:#eef1e6;
+}
+[data-testid="stTabs"] [data-baseweb="tab-highlight"] {background-color:#8b7555!important;}
+.help-strip {
+  padding:1.15rem 1.3rem;
+  border:1px solid #d9dfcf;
+  border-left:4px solid #b99d6f;
+  border-radius:14px;
+  background:linear-gradient(116deg,#edf1e7 0%,#f8f5e9 100%);
+  color:#485947;
+  font-size:.91rem;
+  line-height:1.72;
+}
+.small-overline {
+  color:#8b6447;
+  font-size:.77rem;
+  font-weight:800;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+}
+.footer-line {
+  padding-top:1.5rem;
+  margin-top:2.4rem;
+  color:#697466;
+  font-size:.82rem;
+  line-height:1.8;
+  border-top:1px solid #dcdccf;
+}
+.footer-line a {color:#365d3e;text-decoration:underline;text-decoration-color:#c19f68;text-underline-offset:3px;}
+::-webkit-scrollbar {width:10px;height:10px;}
+::-webkit-scrollbar-thumb {background:#c8c9b8;border:2px solid #f8f6ef;border-radius:9px;}
+@media (max-width:760px) {
+  .block-container {padding-top:.75rem;padding-left:1rem;padding-right:1rem;}
+  .hero {padding:2rem 1.5rem;border-radius:17px;}
+  .hero h1 {font-size:clamp(2rem,7vw,2.6rem);}
+  .hero::after {width:240px;height:240px;right:-115px;top:-120px;}
+  .hero p {font-size:.97rem;}
+  .step {padding:.55rem .72rem;gap:.45rem;font-size:.78rem;}
+  .step b {width:24px;height:24px;}
+  .steps {gap:.55rem;}
+  [data-testid="stMetric"] {min-height:98px;}
+}
+@media (prefers-reduced-motion:reduce) {
+  .stButton button[kind="primary"],.stDownloadButton button[kind="primary"] {transition:none;}
+}
 </style>
 <div class="hero">
   <div class="eyebrow">CrackSAFE-MRC · University Research Demo</div>
