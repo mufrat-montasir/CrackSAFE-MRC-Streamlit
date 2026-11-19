@@ -9,3 +9,4 @@ opencv-python-headless>=4.8,<5
 numpy>=1.26,<2
 Pillow>=10,<12
 huggingface_hub>=0.27,<2
+six==1.17.0
