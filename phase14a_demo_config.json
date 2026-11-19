@@ -1,0 +1,11 @@
+{
+  "selected_ablation": "Boundary + clDice + Lovasz",
+  "encoder_name": "efficientnet-b3",
+  "checkpoint_path": "checkpoint.pt",
+  "temperature": 1.5564953088760376,
+  "mask_threshold": 0.55,
+  "image_size": 448,
+  "apply_packaging_close": true,
+  "packaging_close_kernel": 3,
+  "packaging_min_component_area": 20
+}
