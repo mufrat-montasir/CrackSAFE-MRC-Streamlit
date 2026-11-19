@@ -1,15 +1,17 @@
-
 """CrackSAFE-MRC | Accessible, guided structural-crack research demo.
 
-UI-only redesign: preserves the project inference, segmentation, calibration,
-connected-component detection, and CAM logic from the previous deployment.
+Stability update: preserves segmentation, calibration, thresholds, and detections;
+computes optional GradCAM on a smaller input to reduce peak CPU memory.
 Model weights load from the public university Hugging Face repository.
+GradCAM is opt-in and runs at 256px to reduce memory pressure on free hosting.
 """
 from __future__ import annotations
 
 import hashlib
 import io
 import json
+import gc
+import threading
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -41,7 +43,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 # Prevent oversubscription on Streamlit Community Cloud CPU.
-torch.set_num_threads(2)
+torch.set_num_threads(1)
 
 st.markdown("""
 <style>
@@ -108,6 +110,29 @@ p,li {line-height:1.6;}
 </div>
 """, unsafe_allow_html=True)
 
+def log_process_memory(stage: str) -> None:
+    """Lightweight memory telemetry for Streamlit's cloud logs (Linux only).
+
+    This adds no third-party dependency and is useful if the hosting process
+    gets killed for resource usage before Python can emit a traceback.
+    """
+    try:
+        with open("/proc/self/status", encoding="utf-8") as stat:
+            metrics = {}
+            for line in stat:
+                if line.startswith(("VmRSS:", "VmHWM:")):
+                    key, value = line.split(":", 1)
+                    metrics[key] = round(int(value.strip().split()[0]) / 1024)
+        print(
+            f"[CrackSAFE resource] {stage} | "
+            f"RSS={metrics.get('VmRSS', '?')} MiB | "
+            f"peak={metrics.get('VmHWM', '?')} MiB",
+            flush=True,
+        )
+    except (OSError, ValueError):
+        pass
+
+
 @st.cache_resource(show_spinner="Downloading and loading the research model...")
 def load_model():
     checkpoint = hf_hub_download(repo_id=MODEL_REPO, filename=CFG["checkpoint_path"])
@@ -138,8 +163,15 @@ def load_model():
         cleaned[fixed_key] = value
     model.load_state_dict(cleaned, strict=False)
     model.eval()
+    # Drop the temporary checkpoint and state-dict references after the weights
+    # have been copied into the model. Keep only one cached model in RAM.
+    del ckpt, state_dict, cleaned
+    gc.collect()
+    log_process_memory("model loaded")
     preprocessing = smp.encoders.get_preprocessing_fn(CFG["encoder_name"], "imagenet")
-    return model, preprocessing
+    # Cache a single model with a shared lock: concurrent Streamlit sessions
+    # must not change its GradCAM hooks/gradients simultaneously.
+    return model, preprocessing, threading.RLock()
 
 
 def preprocess_rgb(rgb, preprocessing):
@@ -226,24 +258,17 @@ def make_overlay(image, mask, components):
 
 
 def run_analysis(image, cam_name, confidence_gate):
-    model, preprocessing = load_model()
+    log_process_memory("before segmentation")
+    model, preprocessing, inference_lock = load_model()
     original = np.asarray(image.convert("RGB"), dtype=np.uint8)
     resized, tensor = preprocess_rgb(original, preprocessing)
 
-    with torch.inference_mode():
+    with inference_lock, torch.inference_mode():
         logits = model(tensor).float()[0, 0]
         prob = torch.sigmoid(logits / float(CFG["temperature"])).numpy().astype(np.float32)
 
     mask = clean_binary_mask(prob >= float(CFG["mask_threshold"]))
     cam_mask = mask if mask.sum() else (prob >= np.percentile(prob, 99.5)).astype(np.uint8)
-    target = BinarySegmentationTarget(cam_mask)
-    cam_cls = {"HiResCAM": HiResCAM, "GradCAMPlusPlus": GradCAMPlusPlus,
-               "GradCAM": GradCAM}[cam_name]
-    with cam_cls(model=model, target_layers=[target_layer(model)]) as cam:
-        heatmap = cam(input_tensor=tensor, targets=[target])[0]
-    heatmap_rgb = show_cam_on_image(resized.astype(np.float32) / 255.0,
-                                    heatmap, use_rgb=True)
-
     components = build_components(prob, mask)
     overlay = make_overlay(resized, mask, components)
     binary_mask_rgb = np.repeat((mask * 255)[..., None], 3, axis=2).astype(np.uint8)
@@ -260,7 +285,51 @@ def run_analysis(image, cam_name, confidence_gate):
         "cam_method": cam_name,
         "components": components,
     }
-    return overlay, binary_mask_rgb, heatmap_rgb, summary
+    # Keep the same mask/threshold/connected-components as the research model.
+    # GradCAM is optional because backward hooks on 448x448 can exhaust free CPU RAM.
+    del tensor, logits
+    gc.collect()
+    log_process_memory("segmentation complete")
+    return overlay, binary_mask_rgb, None, summary, cam_mask
+
+
+def generate_explanation(image: Image.Image, target_mask: np.ndarray, cam_name: str) -> np.ndarray:
+    """Compute optional CAM on a 256x256 input to reduce free-tier RAM use.
+
+    This changes only the visualization resolution; the 448x448 segmentation,
+    mask threshold, component detection and quantitative metrics are unchanged.
+    """
+    log_process_memory("before optional CAM")
+    model, preprocessing, inference_lock = load_model()
+    cam_side = 256
+    native_side = int(CFG["image_size"])
+    original = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    display_rgb = cv2.resize(original, (native_side, native_side), interpolation=cv2.INTER_LINEAR)
+    rgb = cv2.resize(original, (cam_side, cam_side), interpolation=cv2.INTER_LINEAR)
+    x = preprocessing(rgb.astype(np.float32))
+    tensor = torch.from_numpy(np.transpose(x, (2, 0, 1)).astype(np.float32)).unsqueeze(0)
+    mask = cv2.resize(target_mask.astype(np.uint8), (cam_side, cam_side), interpolation=cv2.INTER_NEAREST)
+    target = BinarySegmentationTarget(mask)
+    cam_cls = {"HiResCAM": HiResCAM, "GradCAMPlusPlus": GradCAMPlusPlus,
+               "GradCAM": GradCAM}[cam_name]
+    # Resource caching is shared across users. Do not overlap model gradients/hooks.
+    try:
+        with inference_lock:
+            model.zero_grad(set_to_none=True)
+            with cam_cls(model=model, target_layers=[target_layer(model)]) as cam:
+                gray_cam = cam(input_tensor=tensor, targets=[target])[0]
+            model.zero_grad(set_to_none=True)
+        # Overlay onto the same 448x448 input used in the segmentation view.
+        scaled_cam = cv2.resize(gray_cam, (native_side, native_side), interpolation=cv2.INTER_LINEAR)
+        return show_cam_on_image(display_rgb.astype(np.float32) / 255.0,
+                                 np.clip(scaled_cam, 0, 1), use_rgb=True)
+    finally:
+        # Explicit cleanup helps avoid retaining GradCAM intermediate graphs.
+        with inference_lock:
+            model.zero_grad(set_to_none=True)
+        del tensor
+        gc.collect()
+        log_process_memory("optional CAM finished")
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
@@ -287,20 +356,25 @@ def prepare_image(data: bytes) -> Image.Image:
                 raise ValueError("Only JPG and PNG images are supported.")
             if im.width * im.height > MAX_IMAGE_PIXELS:
                 raise ValueError("Image resolution is too large. Maximum: 25 megapixels.")
-            return ImageOps.exif_transpose(im).convert("RGB")
+            # Keep decoded 25MP images out of Streamlit session state: inference
+            # is at 448px, so a preview max dimension of 1600px is sufficient.
+            preview = ImageOps.exif_transpose(im)
+            preview.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
+            return preview.convert("RGB")
     except (UnidentifiedImageError, OSError) as exc:
         raise ValueError("The file could not be opened as a JPG or PNG image.") from exc
 
 
 def png_bytes(rgb: np.ndarray) -> bytes:
     buffer = io.BytesIO()
-    Image.fromarray(rgb.astype(np.uint8), mode="RGB").save(buffer, format="PNG")
+    Image.fromarray(rgb.astype(np.uint8)).save(buffer, format="PNG")
     return buffer.getvalue()
 
 
 def reset_results() -> None:
     st.session_state.pop("analysis_result", None)
     st.session_state.pop("analysis_key", None)
+    gc.collect()
 
 
 st.markdown('<div class="section-label">Upload and analyze</div>', unsafe_allow_html=True)
@@ -346,7 +420,7 @@ with st.container(border=True):
         if image_bytes:
             try:
                 preview_image = prepare_image(image_bytes)
-                st.image(preview_image, caption=f"Input preview · {preview_image.width} × {preview_image.height} px", use_container_width=True)
+                st.image(preview_image, caption=f"Input preview · {preview_image.width} × {preview_image.height} px", width="stretch")
             except ValueError as err:
                 st.error(str(err))
         else:
@@ -362,16 +436,16 @@ with st.container(border=True):
         st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
         run_col, clear_col = st.columns([2.5,1], gap="small")
         with run_col:
-            run_clicked = st.button("Analyze image", type="primary", use_container_width=True)
+            run_clicked = st.button("Analyze image", type="primary", width="stretch")
         with clear_col:
-            clear_clicked = st.button("Clear results", use_container_width=True)
+            clear_clicked = st.button("Clear results", width="stretch")
         if clear_clicked:
             reset_results()
         key = hashlib.sha256(image_bytes).hexdigest() + f"|{cam_method}|{confidence:.2f}"
         if run_clicked:
             reset_results()
             try:
-                with st.spinner("Analyzing the image and generating the explanation..."):
+                with st.spinner("Running crack segmentation..."):
                     result = run_analysis(preview_image, cam_method, confidence)
                 st.session_state["analysis_result"] = result
                 st.session_state["analysis_key"] = key
@@ -383,10 +457,10 @@ with st.container(border=True):
             st.info("Your image or settings changed. Click **Analyze image** to refresh the results.")
     else:
         key = None
-        st.button("Analyze image", disabled=True, type="primary", use_container_width=True)
+        st.button("Analyze image", disabled=True, type="primary", width="stretch")
 
 if key and st.session_state.get("analysis_key") == key and "analysis_result" in st.session_state:
-    overlay, binary, heatmap, summary = st.session_state["analysis_result"]
+    overlay, binary, heatmap, summary, cam_target_mask = st.session_state["analysis_result"]
     found = bool(summary["pred_any"])
     st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
     st.markdown('<div class="small-overline">Analysis results</div>', unsafe_allow_html=True)
@@ -404,17 +478,32 @@ if key and st.session_state.get("analysis_key") == key and "analysis_result" in 
     st.caption("Coverage refers to the 448 × 448 model mask; peak probability is not a whole-image accuracy or safety score.")
 
     st.markdown("### See what the model found")
+    if heatmap is None:
+        st.caption("For reliable free hosting, crack segmentation runs first. "
+                   "The optional explanation uses additional CPU resources at a reduced 256px resolution.")
+        if st.button("Generate explanation heatmap (optional, higher memory use)", key="make_cam", width="stretch"):
+            try:
+                with st.spinner("Preparing the explanation on the shared CPU..."):
+                    heatmap = generate_explanation(preview_image, cam_target_mask, cam_method)
+                st.session_state["analysis_result"] = (overlay, binary, heatmap, summary, cam_target_mask)
+            except Exception as exc:
+                st.warning("The explanation could not be generated on this host. The crack analysis above remains available.")
+                with st.expander("Explanation error details"):
+                    st.exception(exc)
     tab_overview, tab_overlay, tab_mask, tab_heat, tab_details = st.tabs(
         ["Quick comparison", "Detection overlay", "Binary mask", "AI explanation", "Technical details"])
 
     with tab_overview:
         a,b,c = st.columns(3, gap="medium")
         with a:
-            st.image(preview_image, caption="1 · Your image", use_container_width=True)
+            st.image(preview_image, caption="1 · Your image", width="stretch")
         with b:
-            st.image(overlay, caption="2 · Marked regions", use_container_width=True)
+            st.image(overlay, caption="2 · Marked regions", width="stretch")
         with c:
-            st.image(heatmap, caption="3 · Visual explanation", use_container_width=True)
+            if heatmap is not None:
+                st.image(heatmap, caption="3 · Visual explanation (256px CAM)", width="stretch")
+            else:
+                st.info("Optional explanation not generated. Use the button above to add it.")
         st.markdown("""
         <div class="help-strip"><strong>How to read this:</strong> The green tint marks pixels in the predicted crack mask.
         Blue rectangles and yellow outlines mark connected regions. Warm colors in the heatmap highlight
@@ -424,9 +513,9 @@ if key and st.session_state.get("analysis_key") == key and "analysis_result" in 
     with tab_overlay:
         view, info = st.columns([1.35, .85], gap="large")
         with view:
-            st.image(overlay, caption="Detected region overlay", use_container_width=True)
+            st.image(overlay, caption="Detected region overlay", width="stretch")
             st.download_button("Download overlay (PNG)", png_bytes(overlay),
-                               "cracksafe_detection_overlay.png", "image/png",use_container_width=True)
+                               "cracksafe_detection_overlay.png", "image/png",width="stretch")
         with info:
             st.markdown("**Detected regions**")
             st.write(f"{int(summary['num_components'])} connected region(s) after morphological cleanup.")
@@ -436,9 +525,9 @@ if key and st.session_state.get("analysis_key") == key and "analysis_result" in 
     with tab_mask:
         view, info = st.columns([1.35, .85], gap="large")
         with view:
-            st.image(binary, caption="Binary segmentation mask", use_container_width=True)
+            st.image(binary, caption="Binary segmentation mask", width="stretch")
             st.download_button("Download mask (PNG)", png_bytes(binary),
-                               "cracksafe_binary_mask.png", "image/png",use_container_width=True)
+                               "cracksafe_binary_mask.png", "image/png",width="stretch")
         with info:
             st.markdown("**Reading the mask**")
             st.write("White pixels represent the model's predicted crack area; black pixels represent background.")
@@ -448,14 +537,17 @@ if key and st.session_state.get("analysis_key") == key and "analysis_result" in 
     with tab_heat:
         view, info = st.columns([1.35, .85], gap="large")
         with view:
-            st.image(heatmap, caption=f"{summary['cam_method']} explanation", use_container_width=True)
-            st.download_button("Download heatmap (PNG)", png_bytes(heatmap),
-                               "cracksafe_explanation_heatmap.png", "image/png",use_container_width=True)
+            if heatmap is not None:
+                st.image(heatmap, caption=f"{summary['cam_method']} explanation (256px CAM)", width="stretch")
+                st.download_button("Download heatmap (PNG)", png_bytes(heatmap),
+                                   "cracksafe_explanation_heatmap.png", "image/png",width="stretch")
+            else:
+                st.info("Explanation not generated yet. Use the Generate AI explanation button above.")
         with info:
             st.markdown("**Understanding the heatmap**")
             st.write("Warmer colors indicate regions highlighted by the selected CAM technique.")
             st.write(f"Current technique: **{summary['cam_method']}**")
-            st.caption("Attribution is an interpretability aid, not a calibrated probability map or crack boundary.")
+            st.caption("The optional heatmap uses a 256px CAM input for memory efficiency and is rescaled for viewing. Attribution is not a calibrated probability map or crack boundary.")
 
     with tab_details:
         st.markdown("**Research configuration**")
@@ -486,7 +578,7 @@ else:
     <div class="help-strip" style="margin-top:1.1rem">
       <strong>What you'll get after analysis</strong><br>
       A clear crack/no-mask finding, estimated segmented coverage, a region overlay,
-      a black-and-white segmentation mask, a CAM explanation, and optional downloadable research data.
+      a black-and-white segmentation mask, an optional CAM explanation, and downloadable research data.
     </div>
     """, unsafe_allow_html=True)
 
